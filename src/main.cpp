@@ -1,6 +1,7 @@
 //ライブラリを読み込む
 #include <LiquidCrystal.h>
 #include <Arduino.h>
+#include "DynamicAuth.h"
 
 enum {
   knock_authentication,
@@ -39,6 +40,9 @@ void Unlock();
  const int rotation = 29;
  const int LED = 25;
 
+// DynamicAuth オブジェクト初期化
+DynamicAuth auth(knock, rotation);
+
 //LiquidCrystal型の変数を用意
 //LiquidCrystal lcd(12,11,5,4,3,2);
 //const int JoyStick_X = A0;
@@ -61,6 +65,9 @@ void setup() {
   lcd.clear();
 
   pinMode(JoyStick_Z, INPUT);
+
+  // DynamicAuth初期化
+  auth.begin();
 
   lcd.setCursor(0, 0);
 
@@ -135,125 +142,11 @@ void loop() {
 
 // Knock authentication(setting)
 bool setKnock_pattern() {
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("please knock the");
-  lcd.setCursor(0,1);
-  lcd.print("sensor");
-
-  int count = 0;               
-  bool knock_active = false;
-  unsigned long last_knock = 0;
-
-  // LPF 初期化
-  int kn = analogRead(knock);
-  lpf = kn;
-
-  while (count < 3) {
-    kn = analogRead(knock);
-    lpf = (lpf * 15 + kn) / 16;
-
-    int knock_interval = millis() - last_knock;
-    // ノック開始（立ち上がり）
-    if (!knock_active && lpf > 100 && knock_interval > 1000) {
-      knock_active = true;
-      last_knock = millis();
-
-      Knock_Data.Strength[count] = lpf;
-//      Knock_Data[i].Interval[j] = knock_interval;
-      Knock_Data.Strength_sum += Knock_Data.Strength[count];
-//      Knock_Data[j].Interval_ave += Knock_Data[i].Interval[j];
-      count++;
-
-      lcd.clear();
-      lcd.setCursor(0,0);
-      lcd.print("knock ");
-      lcd.print(count);
-      lcd.setCursor(0,1);
-      lcd.print("str ");
-      lcd.print(Knock_Data.Strength[count]);
-    }
-    
-    // ノック終了（戻ったら解除）
-    if (knock_active && lpf < 80) {
-      knock_active = false;
-    }
-
-    delay(5);
-  }
-  
-  Knock_Data.Strength_ave = (int)(Knock_Data.Strength_sum / 3);
-  
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("ave ");
-  lcd.print(Knock_Data.Strength_ave);
-  return 1;
+  return auth.registerKnockSequence(lcd);
 }
 
 bool setEncoder_rotate() {
-  const int START_TH = 12;
-  const int STOP_TH  = 3;
-
-  unsigned long stop_time = 0;
-
-  int count = 0;
-  int last = analogRead(rotation);
-  bool rotating = false;
-
-  Rotary.sum = 0;
-
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("rotate sensor");
-
-  while (count < 3) {
-    int now = analogRead(rotation);
-    int delta = abs(now - last);
-
-    if (!rotating && delta > START_TH) {
-      rotating = true;
-      stop_time = millis();
-      Rotary.data[count] = 0;   // ★必須
-    }
-
-    if (rotating) {
-      Rotary.data[count] = max(Rotary.data[count], delta);
-
-      if (delta < STOP_TH) {
-        if (millis() - stop_time > 200) {
-          rotating = false;
-          Rotary.sum += Rotary.data[count];
-          count++;
-
-          lcd.clear();
-          lcd.setCursor(0, 0);
-          lcd.print("rotary ");
-          lcd.print(count);
-          lcd.setCursor(0, 1);
-          lcd.print("data ");
-          lcd.print(Rotary.data[count - 1]);
-
-          delay(500);
-        }
-      } else {
-        stop_time = millis();
-      }
-    }
-
-    last = now;
-    delay(500);
-  }
-
-  Rotary.ave = Rotary.sum / 3;
-
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("rotary ave");
-  lcd.setCursor(0, 1);
-  lcd.print(Rotary.ave);
-
-  delay(1000);
+  auth.registerRotationKey(lcd);
   return true;
 }
 
@@ -289,111 +182,17 @@ bool saved_data(int authentication, bool isSave, int z) {
   return false;
 }
 
-int measureRotaryOnce(unsigned long timeout_ms = 2000) {
-  const int START_TH = 12;
-  const int STOP_TH  = 3;
-
-  int last = analogRead(rotation);
-  bool rotating = false;
-  int max_delta = 0;
-  unsigned long stop_time = 0;
-  unsigned long rotate_start_time = 0;
-
-  while (true) {
-    int now = analogRead(rotation);
-    int delta = abs(now - last);
-
-    // 回転開始待ち（ここでは timeout を見ない）
-    if (!rotating && delta > START_TH) {
-      rotating = true;
-      max_delta = 0;
-      stop_time = millis();
-      rotate_start_time = millis();
-    }
-
-    if (rotating) {
-      max_delta = max(max_delta, delta);
-
-      // 回転終了判定
-      if (delta < STOP_TH) {
-        if (millis() - stop_time > 200) {
-          return max_delta;   // 正常確定
-        }
-      } else {
-        stop_time = millis();
-      }
-
-      // 回転中 timeout
-      if (millis() - rotate_start_time > timeout_ms) {
-        return 0; // 回転したが異常
-      }
-    }
-
-    last = now;
-    delay(1000);
-  }
-}
-
-int measureKnockOnce(unsigned long timeout_ms = 2000) {
-  unsigned long start = millis();
-  int lpf = analogRead(knock);
-  int max_lpf = 0;
-  bool active = false;
-
-  while (millis() - start < timeout_ms) {
-    int kn = analogRead(knock);
-    lpf = (lpf * 15 + kn) / 16;
-
-    if (!active && lpf > 100) {
-      active = true;
-      max_lpf = lpf;
-    }
-
-    if (active) {
-      max_lpf = max(max_lpf, lpf);
-      if (lpf < 80) {
-        return max_lpf; // 確定
-      }
-    }
-
-    delay(5);
-  }
-
-  return 0; // タイムアウト
-}
 
 void Unlock() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("knock password");
-
-  int knock_val = measureKnockOnce();
-  if (knock_val == 0 ||
-      abs(knock_val - Knock_Data.Strength_ave) > Knock_Data.Strength_ave * 0.4) {
+  if (auth.authenticate(lcd)) {
     lcd.clear();
-    lcd.print("knock error");
+    lcd.print("!!UNLOCK!!");
+    digitalWrite(LED, HIGH);
+    Serial.print("!!UNLOCK!!");
+  } else {
+    lcd.clear();
+    lcd.print("Authentication Failed");
     delay(800);
     return;
   }
-
-  lcd.clear();
-  lcd.print("knock OK");
-  delay(500);
-
-  lcd.clear();
-  lcd.print("rotary pass");
-
-  int rotary_val = measureRotaryOnce();
-  if (rotary_val == 0 ||
-      abs(rotary_val - Rotary.ave) > Rotary.ave * 0.2) {
-    lcd.clear();
-    lcd.print("rotary error");
-    delay(800);
-    return;
-  }
-
-  lcd.clear();
-  lcd.print("UNLOCK!");
-  digitalWrite(LED, HIGH);
-  Serial.print("!! UNLOCK !!");
 }

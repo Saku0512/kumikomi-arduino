@@ -12,7 +12,7 @@ DynamicAuth::DynamicAuth(int pinKnock, int pinRotary) {
 }
 
 void DynamicAuth::begin() {
-    pinMode(_pinRotary, INPUT);
+    //pinMode(_pinRotary, INPUT);
     // Knockピンはアナログ入力なのでpinMode不要の場合が多いが、明示しても良い
     _lpfValue = analogRead(_pinKnock);
 }
@@ -78,7 +78,9 @@ bool DynamicAuth::registerKnockSequence(LiquidCrystal &lcd) {
             lcd.print(i + 1);
             
             int strength = readSingleKnock();
-            
+            Serial.print("strength: ");
+            Serial.println(strength);
+
             if (strength == 0) {
                 lcd.clear();
                 lcd.print("Time out!");
