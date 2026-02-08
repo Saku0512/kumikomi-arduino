@@ -115,6 +115,7 @@ void loop() {
 void handleMenuAction(int page) {
   switch (page) {
     case 1: // ノック設定
+    Serial.print("!!LOCK!!");
       if (auth.registerKnockSequence(lcd)) {
         is_knock_setup_done = true;
       }
