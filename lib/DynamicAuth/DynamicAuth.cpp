@@ -12,123 +12,153 @@ DynamicAuth::DynamicAuth(int pinKnock, int pinRotary) {
 }
 
 void DynamicAuth::begin() {
-    //pinMode(_pinRotary, INPUT);
-    // Knockピンはアナログ入力なのでpinMode不要の場合が多いが、明示しても良い
+    // pinKnockはアナログ入力なので通常設定不要ですが、明示的に初期値を読みます
     _lpfValue = analogRead(_pinKnock);
+    // メイン側で Serial.begin(115200); が呼ばれている前提です
+    Serial.println("DynamicAuth System Initialized");
 }
 
 // 簡易的なLPF (ノイズ除去)
 int DynamicAuth::getFilteredSensorValue() {
     int raw = analogRead(_pinKnock);
-    // [cite: 16] ノイズ排除の簡易実装 (前回のコードの流用)
+    // 前回の値に重み付けをして急激な変化（スパイクノイズ）を抑える
     _lpfValue = (_lpfValue * 15 + raw) / 16;
     return _lpfValue;
 }
 
-// ノック待ち受け処理 (1回分)
+// ノック1回分の強さを取得
 int DynamicAuth::readSingleKnock() {
     int peakValue = 0;
     bool knockStarted = false;
     unsigned long startTime = millis();
     
-    // タイムアウト設定 (例えば3秒待つ)
+    Serial.println("--- Waiting for Knock ---");
+
+    // 3秒間待機
     while (millis() - startTime < 3000) {
         int val = getFilteredSensorValue();
 
-        // 閾値を超えたらノック開始とみなす
+        // デバッグ用：値が少しでも動いたら表示（ノイズ確認用）
+        // if (val > 5) { Serial.print("."); }
+
+        // 閾値を超えたらノック開始とみなす (センサー感度により 20 を調整してください)
         if (!knockStarted && val > 20) { 
             knockStarted = true;
+            Serial.println("\nKnock Detected! Recording peak...");
         }
 
-        // ノック中の最大値(ピーク)を取得＝「強さ」とする
+        // ノック中の最大値(ピーク)を取得
         if (knockStarted) {
             if (val > peakValue) peakValue = val;
             
             // 値が下がったらノック終了とみなす
             if (val < 15 && peakValue > 20) {
-                delay(100); // チャタリング防止
+                delay(150); // チャタリング（余韻）防止
+                Serial.print("Knock Peak Value: ");
+                Serial.println(peakValue);
                 return peakValue;
             }
         }
         delay(2);
     }
+    
+    Serial.println("\nKnock Timeout (No input)");
     return 0; // タイムアウト
 }
 
-// [処理3] 固有秘密鍵の登録 (3回3セット平均) 
+// [処理3] ノックパターンの登録 (3セット平均法)
 bool DynamicAuth::registerKnockSequence(LiquidCrystal &lcd) {
     long sumPattern[KNOCK_COUNTS_PER_SET] = {0}; // 合計値保持用
 
     lcd.clear();
     lcd.print("Start Setup...");
+    Serial.println("=== Start Knock Setup ===");
     delay(1000);
 
-    // 3セット繰り返す
+    // セット数分繰り返す (例: 3セット)
     for (int set = 1; set <= KNOCK_SETS; set++) {
         lcd.clear();
-        lcd.print("Set: ");
-        lcd.print(set);
-        lcd.print("/");
-        lcd.print(KNOCK_SETS);
+        lcd.print("Set: "); lcd.print(set); lcd.print("/"); lcd.print(KNOCK_SETS);
+        Serial.print("\n--- Set "); Serial.print(set); Serial.println(" ---");
+        delay(1000); // 準備時間
         
-        // 各セットで3回ノックさせる
+        // 1セット内の回数分ノックさせる (例: 3回)
         for (int i = 0; i < KNOCK_COUNTS_PER_SET; i++) {
             lcd.setCursor(0, 1);
-            lcd.print("Knock: ");
-            lcd.print(i + 1);
+            lcd.print("Knock #"); lcd.print(i + 1); lcd.print("     "); 
             
             int strength = readSingleKnock();
-            Serial.print("strength: ");
-            Serial.println(strength);
-
+            
             if (strength == 0) {
                 lcd.clear();
                 lcd.print("Time out!");
+                Serial.println("Setup Failed: Timeout");
                 delay(1000);
                 return false; // 失敗
             }
 
+            // --- 強化した表示 ---
+            // LCDに数値を出す
+            lcd.setCursor(10, 1);
+            lcd.print(strength);
+            lcd.print("   "); // 前の数字を消す空白
+            
+            // Serialにも出す
+            Serial.print("Input "); Serial.print(i+1); 
+            Serial.print(": "); Serial.println(strength);
+            
+            delay(500); 
+
             // 合計に加算
             sumPattern[i] += strength;
-            
-            // フィードバック
-            lcd.setCursor(10, 1);
-            lcd.print("OK!");
-            delay(500);
         }
+        
         lcd.clear();
-        lcd.print("Set Next...");
-        delay(1000);
+        lcd.print("Set "); lcd.print(set); lcd.print(" OK!");
+        delay(800);
     }
 
-    // 平均値を計算してリファレンス(固有秘密鍵)とする
-    // K_ref = Sum / 3 [cite: 17]
+    // 平均値を計算して保存
+    Serial.println("\n=== Calculating Reference Keys ===");
     for (int i = 0; i < KNOCK_COUNTS_PER_SET; i++) {
         _refKnockPattern[i] = sumPattern[i] / KNOCK_SETS;
+        
+        // 保存された鍵を表示
+        Serial.print("Key["); Serial.print(i); Serial.print("]: ");
+        Serial.println(_refKnockPattern[i]);
     }
 
     lcd.clear();
-    lcd.print("Knock Reg OK!");
+    lcd.print("Knock Saved!");
     delay(1000);
     return true;
 }
 
-// [処理4] 可変秘密鍵の登録
+// [処理4] ダイヤル位置の登録
 void DynamicAuth::registerRotationKey(LiquidCrystal &lcd) {
     lcd.clear();
     lcd.print("Set Dial...");
-    delay(500);
+    Serial.println("=== Start Rotary Setup ===");
     
-    // ユーザーが値を決める時間を設ける (ここではボタン押下などで確定させるのが理想だが、簡易的に数秒待つ)
-    // 実運用ではJoyStickのボタン押下をトリガーにする設計が良いため、
-    // ここでは「現在の値を読み取る」機能に留める。
+    // 3秒間リアルタイム値を表示して、ユーザーに調整させる
+    unsigned long start = millis();
+    while(millis() - start < 3000) {
+        int val = analogRead(_pinRotary);
+        lcd.setCursor(0, 1);
+        lcd.print("Val: "); lcd.print(val); lcd.print("   ");
+        // Serial.println(val); 
+        delay(100);
+    }
     
-    int val = analogRead(_pinRotary);
-    // ノイズ対策で数回読んで平均しても良い
-    _refRotationValue = val;
+    // 最終値を保存
+    _refRotationValue = analogRead(_pinRotary);
     
+    Serial.print("Rotary Key Saved: ");
+    Serial.println(_refRotationValue);
+
+    lcd.clear();
+    lcd.print("Dial Saved:");
     lcd.setCursor(0, 1);
-    lcd.print("Value: ");
     lcd.print(_refRotationValue);
     delay(1000);
 }
@@ -137,44 +167,78 @@ void DynamicAuth::registerRotationKey(LiquidCrystal &lcd) {
 bool DynamicAuth::authenticate(LiquidCrystal &lcd) {
     lcd.clear();
     lcd.print("Authenticating...");
+    Serial.println("\n=== START AUTHENTICATION ===");
+    delay(1000);
     
     // 1. ノックの照合
     for (int i = 0; i < KNOCK_COUNTS_PER_SET; i++) {
-        lcd.setCursor(0, 1);
-        lcd.print("Knock input: ");
-        lcd.print(i + 1);
+        lcd.clear();
+        lcd.print("Knock #"); lcd.print(i + 1); lcd.print(" ?");
+        
+        Serial.print("Waiting for Auth Knock #"); Serial.println(i+1);
 
         int inputStrength = readSingleKnock();
         int refStrength = _refKnockPattern[i];
 
-        // 許容誤差 ±5% の計算 
+        // 許容誤差の計算
         int tolerance = refStrength * KNOCK_TOLERANCE_PERCENT / 100;
-        int minVal = refStrength - tolerance;
-        int maxVal = refStrength + tolerance;
+        if(tolerance < 10) tolerance = 10; // 最小許容値を設定
 
-        // 範囲外なら認証失敗
-        if (inputStrength < minVal || inputStrength > maxVal) {
+        int diff = abs(inputStrength - refStrength);
+
+        // 詳細な判定ログ
+        Serial.print("Input: "); Serial.print(inputStrength);
+        Serial.print(" / Ref: "); Serial.print(refStrength);
+        Serial.print(" (Tol: "); Serial.print(tolerance);
+        Serial.print(") -> Diff: "); Serial.println(diff);
+
+        // 判定
+        if (diff > tolerance) {
             lcd.clear();
             lcd.print("Knock Fail!");
             lcd.setCursor(0,1);
-            lcd.print("Diff: ");
-            lcd.print(abs(inputStrength - refStrength));
-            delay(2000);
+            lcd.print("In:"); lcd.print(inputStrength);
+            lcd.print(" Ref:"); lcd.print(refStrength);
+            
+            Serial.println("!!! KNOCK AUTH FAILED !!!");
+            delay(3000); // 失敗した数値をしっかり見せる
             return false;
         }
+        
+        lcd.setCursor(12, 0);
+        lcd.print("OK");
+        Serial.println("-> OK");
+        delay(500);
     }
 
-    // 2. ローテーションの照合
+    // 2. ダイヤルの照合
+    lcd.clear();
+    lcd.print("Check Dial...");
+    Serial.println("Checking Rotary...");
+    delay(1000); 
+    
     int currentRotary = analogRead(_pinRotary);
-    // ロータリーも少し誤差を許容しないと人間には合わせられないため、仮に範囲を設ける
-    if (abs(currentRotary - _refRotationValue) > 50) { // 閾値は調整が必要
+    int rotaryDiff = abs(currentRotary - _refRotationValue);
+
+    Serial.print("Current: "); Serial.print(currentRotary);
+    Serial.print(" / Ref: "); Serial.print(_refRotationValue);
+    Serial.print(" -> Diff: "); Serial.println(rotaryDiff);
+    
+    // ダイヤル誤差許容範囲
+    if (rotaryDiff > 100) { 
         lcd.clear();
         lcd.print("Dial Fail!");
+        lcd.setCursor(0,1);
+        lcd.print(currentRotary);
+        lcd.print(" vs ");
+        lcd.print(_refRotationValue);
+        
+        Serial.println("!!! ROTARY AUTH FAILED !!!");
         delay(2000);
         return false;
     }
 
-    // すべて通過
+    Serial.println("=== AUTHENTICATION SUCCESS ===");
     return true;
 }
 
