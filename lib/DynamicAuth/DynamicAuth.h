@@ -4,41 +4,50 @@
 #include <Arduino.h>
 #include <LiquidCrystal.h>
 
-// 仕様設定
-#define KNOCK_TOLERANCE_PERCENT 20  // 許容誤差 ±20% (5%だと人間には厳しすぎるため緩和)
-#define KNOCK_SETS 3                // 平均を取るセット数
-#define KNOCK_COUNTS_PER_SET 3      // 1セットあたりのノック回数
+// パスワードの桁数
+#define PASSWORD_LENGTH 4
+
+// 方向の定義
+enum Direction {
+    DIR_NONE = 0,
+    DIR_UP,
+    DIR_DOWN,
+    DIR_LEFT,
+    DIR_RIGHT,
+    DIR_CENTER
+};
 
 class DynamicAuth {
 private:
-    int _pinKnock;
-    int _pinRotary;
+    int _pinX;
+    int _pinY;
+    int _pinZ;
     
-    // 登録された「正解」データ (固有秘密鍵)
-    int _refKnockPattern[KNOCK_COUNTS_PER_SET]; 
-    int _refRotationValue;
+    // 中心値（キャリブレーション用）
+    int _offsetX;
+    int _offsetY;
 
-    // 内部変数
-    int _lpfValue; // ノイズ除去用
+    // 保存されたパスワード（正解データ）
+    Direction _secretCode[PASSWORD_LENGTH];
 
-    // 内部関数
-    int readSingleKnock();      // 単発ノック読み取り
-    int getFilteredSensorValue(); // フィルタ済み値取得
+    // 内部関数: 方向入力を1回読み取る（入力があるまでブロックする）
+    Direction waitForInput(LiquidCrystal &lcd);
+    
+    // 方向を文字列に変換（表示用）
+    String dirToString(Direction dir);
 
 public:
-    DynamicAuth(int pinKnock, int pinRotary);
+    DynamicAuth(int pinX, int pinY, int pinZ);
     void begin();
 
-    // [処理3] ノックパターンの登録
-    bool registerKnockSequence(LiquidCrystal &lcd);
+    // ジョイスティックのキャリブレーション（起動時に呼ぶ）
+    void calibrate();
 
-    // [処理4] 回転位置の登録
-    void registerRotationKey(LiquidCrystal &lcd);
+    // パスワード設定（短押し）
+    void setPassword(LiquidCrystal &lcd);
 
-    // [処理5] 認証実行
+    // 認証実行（長押し）
     bool authenticate(LiquidCrystal &lcd);
-    
-    void debugPrintKeys();
 };
 
 #endif
