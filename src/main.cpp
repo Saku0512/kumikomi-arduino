@@ -115,7 +115,7 @@ void loop() {
 void handleMenuAction(int page) {
   switch (page) {
     case 1: // ノック設定
-    Serial.print("!!LOCK!!");
+    Serial.println("!!LOCK!!");
       if (auth.registerKnockSequence(lcd)) {
         is_knock_setup_done = true;
       }
@@ -143,7 +143,7 @@ void Unlock() {
   if (auth.authenticate(lcd)) {
     lcd.clear();
     lcd.print("!!UNLOCK!!");
-    Serial.print("!!UNLOCK!!");
+    Serial.println("!!UNLOCK!!");
     digitalWrite(LED, HIGH); // LED点灯
     delay(3000);
     digitalWrite(LED, LOW);
