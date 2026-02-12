@@ -75,6 +75,19 @@ Direction DynamicAuth::waitForInput(LiquidCrystal &lcd) {
     }
 }
 
+Direction DynamicAuth::getCurrentDirection() {
+    int x = analogRead(_pinX) - _offsetX;
+    int y = analogRead(_pinY) - _offsetY;
+    const int THRESHOLD = 200; 
+
+    if (x < -THRESHOLD) return DIR_LEFT; // ※配線によりLEFT/RIGHT逆ならここを修正
+    if (x > THRESHOLD) return DIR_RIGHT;
+    if (y < -THRESHOLD) return DIR_DOWN;    // ※配線によりUP/DOWN逆ならここを修正
+    if (y > THRESHOLD) return DIR_UP;
+    
+    return DIR_CENTER;
+}
+
 // パスワード設定モード
 void DynamicAuth::setPassword(LiquidCrystal &lcd) {
     lcd.clear();

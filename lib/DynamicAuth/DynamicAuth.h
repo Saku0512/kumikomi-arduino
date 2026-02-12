@@ -43,6 +43,8 @@ public:
     // ジョイスティックのキャリブレーション（起動時に呼ぶ）
     void calibrate();
 
+    Direction getCurrentDirection();
+
     // パスワード設定（短押し）
     void setPassword(LiquidCrystal &lcd);
 
