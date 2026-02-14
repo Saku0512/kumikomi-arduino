@@ -14,3 +14,8 @@ More information about PlatformIO Unit Testing:
 ```bash
 > pio run -t upload
 ```
+
+モニター
+```bash
+> pio device monitor
+```

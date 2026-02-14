@@ -13,6 +13,7 @@ print("Listening serial...")
 
 # ロック画面のプロセスを保持する変数
 lock_process = None
+unlock_process = None
 
 try:
     while True:
@@ -42,9 +43,23 @@ try:
         elif UNLOCK_WORD in line:
             if lock_process and lock_process.poll() is None:
                 print("Unlock command received. Killing lock screen...")
-                lock_process.terminate() # プロセスを終了させる
-                lock_process.wait()      # 完全に終了するのを待つ
-                lock_process = None      # 変数をリセット
+                # 1. 先に Unlock 画面を起動する
+                unlock_process = subprocess.Popen(["python3", "unlock_screen.py"])
+                
+                # 2. わずかに待機（Unlock画面が描画されるための猶予）
+                # ※マシンスペックに合わせて 0.1〜0.3 程度で調整
+                time.sleep(0.2) 
+                
+                # 3. その後、Lock 画面を消す
+                lock_process.terminate()
+                lock_process.wait()
+                lock_process = None
+                
+                # 4. Unlock 画面を一定時間出してから消す
+                time.sleep(0.5)
+                unlock_process.terminate()
+                unlock_process.wait()
+                unlock_process = None
             else:
                 print("Lock screen is not running.")
 
